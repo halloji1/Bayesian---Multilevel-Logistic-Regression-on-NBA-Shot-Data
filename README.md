@@ -149,41 +149,96 @@ A tight prior centered on effect sizes reported in published basketball analytic
 
 ## Analysis Pipeline
 
-### 1. Data Acquisition & Cleaning
-- Source: Kaggle NBA Shot Logs (see [Dataset](#dataset) section above)
-- Drop rows with missing `SHOT_CLOCK`, negative `TOUCH_TIME`, or negative distances
-- Parse `GAME_CLOCK` from `MM:SS` to seconds
-- Construct `CLUTCH` flag from `PERIOD`, `GAME_CLOCK`, and `FINAL_MARGIN`
-- Filter to players with ≥ 100 shot attempts to stabilize random effect estimation
+### 1. Data Acquisition (`src/download_data.py`)
+- Download from Kaggle: `dansbecker/nba-shot-logs` (see [Dataset](#dataset) section)
+- Use `kagglehub` API; fall back to `kaggle` CLI
+- Save `shot_logs.csv` to `data/raw/`
+- Skip if file exists unless `--force` flag is passed
 
-### 2. Exploratory Data Analysis
-- Shot charts, FG% by player/team/position, distribution checks, correlation analysis
-- **Note:** Avoid double-dipping — priors should be set from external knowledge, not the current dataset
+### 2. Data Cleaning (`src/clean_data.py`)
 
-### 3. Variable Preparation
-- z-score standardization of continuous predictors (critical for prior scale comparability)
-- Dummy / effect coding for categorical variables
+Input: `data/raw/shot_logs.csv` → Output: `data/processed/shots_clean.csv`
 
-### 4. Model Estimation (MCMC)
-- **R:** `brms` (Stan backend)
-- **Python:** `PyMC` or `NumPyro`
+**2.1 Column selection.** Retain only columns relevant to modeling and EDA: `SHOT_DIST`, `CLOSE_DEF_DIST`, `SHOT_CLOCK`, `TOUCH_TIME`, `PERIOD`, `GAME_CLOCK`, `FGM`, `player_name`, `player_id`, `LOCATION`, `SHOT_RESULT`, `FINAL_MARGIN`, `PTS_TYPE`. Drop unused columns (`GAME_ID`, `MATCHUP`, `DRIBBLES`, `CLOSEST_DEFENDER`, `CLOSEST_DEFENDER_PLAYER_ID`, `PTS`, `W`, `SHOT_NUMBER`).
+
+**2.2 Missing value handling.** Drop rows with missing `SHOT_CLOCK` (~5,500 rows, mostly shots taken with under 24s left in a period when the shot clock is off). No imputation — these shots are systematically different from regular-clock shots and would bias the estimate.
+
+**2.3 Implausible value filtering.** Drop rows where:
+- `TOUCH_TIME < 0` (data entry errors)
+- `SHOT_DIST < 0` (impossible)
+- `CLOSE_DEF_DIST < 0` (impossible)
+
+Cap `TOUCH_TIME > 24` at 24 seconds (a possession cannot exceed the shot clock; values slightly above 24 are rounding artifacts).
+
+**2.4 Time parsing.** Convert `GAME_CLOCK` from `"MM:SS"` string to total seconds (`GAME_CLOCK_SEC`).
+
+**2.5 Clutch flag construction.** Create binary `CLUTCH` indicator following NBA's standard definition:
+```
+CLUTCH = (PERIOD >= 4) AND (GAME_CLOCK_SEC <= 300) AND (abs(FINAL_MARGIN) <= 5)
+```
+**Limitation:** the dataset only provides game-final margin, not the live margin at shot time. This is documented as a known approximation — a shot in a tied 4th quarter that became a blowout is incorrectly excluded, and vice versa.
+
+**2.6 Player volume filter.** Drop players with fewer than `MIN_SHOTS_PER_PLAYER = 100` attempts.
+
+> **Why 100?** This is a configurable empirical threshold balancing three concerns:
+> - **Statistical precision:** With $n = 100$ and $p \approx 0.45$, the standard error on a player's FG% is ~5 percentage points — enough to distinguish good from poor shooters but not for fine ranking. Lower thresholds yield random effects dominated by noise rather than signal.
+> - **Random slope identifiability:** H5 requires per-player distance slopes. Disentangling distance effects from baseline skill needs sufficient variance in distance per player.
+> - **Computational cost:** Player count $J$ scales the random effect parameter space linearly. At $n \geq 100$, $J \approx 280$–300 players (NBA rotation regulars). At $n \geq 50$, $J$ jumps to ~360 with marginal information gain. At $n \geq 200$, $J$ drops to ~200 and excludes ~⅓ of rotation players.
+>
+> Sensitivity to this threshold is checked by re-running with $n \geq 50$ and $n \geq 200$ and confirming that fixed-effect posteriors are stable.
+
+**2.7 Logging.** Record row counts before/after each filter, final shape, and number of unique players retained.
+
+### 3. Exploratory Data Analysis (`src/eda.py`)
+- Shot distance distribution, FG% by distance bucket, FG% by player (top/bottom 20), defender distance distribution, correlation heatmap
+- Summary statistics written to `outputs/reports/eda_summary.txt`
+- **Note:** EDA informs sanity checks but does NOT inform priors — priors are set from external literature to avoid double-dipping
+
+### 4. Feature Preparation (`src/prepare_features.py`)
+
+Input: `data/processed/shots_clean.csv` → Outputs: `train.csv`, `test.csv`, `player_index.csv`, `scaler_params.json`
+
+**4.1 Standardization.** z-score the four continuous predictors, saved as `*_z` columns alongside originals:
+- `SHOT_DIST_z`, `CLOSE_DEF_DIST_z`, `SHOT_CLOCK_z`, `TOUCH_TIME_z`
+
+Standardization serves two purposes:
+- Makes the prior scale (`Normal(0, 0.5)` for slopes) comparable across predictors with different units
+- Reduces posterior correlation between intercept and slopes, improving MCMC mixing
+
+Means and SDs are persisted to `scaler_params.json` for back-transformation when interpreting results.
+
+**4.2 Player factor encoding.** Convert `player_id` to a contiguous 0-indexed integer factor `player_idx` (required for PyMC indexing). Save the mapping `player_id ↔ player_name ↔ player_idx` to `player_index.csv`.
+
+**4.3 Train/test split.** 80/20 stratified split on `player_idx` so every player appears in both splits — necessary because random effects are player-specific and a player absent from training cannot be predicted in test. Use `RANDOM_SEED` from `config.py` for reproducibility.
+
+**4.4 Sanity checks.** Verify:
+- All players in test set also appear in training set
+- Standardized predictors have mean ≈ 0, SD ≈ 1 on training set
+- Class balance of `FGM` is preserved across splits (within ±1%)
+
+### 5. Model Estimation (`src/fit_model.py`)
+- PyMC implementation with **non-centered parameterization** for player random effects (avoids divergent transitions)
+- Sampling: 4 chains, 2000 draws + 1000 tune, `target_accept=0.95`
+- Save `InferenceData` to `outputs/models/fit_prior_{A|B}.nc`
 - Convergence diagnostics: R-hat < 1.01, ESS > 400, zero divergent transitions, trace plots
 
-### 5. Model Comparison
+### 6. Model Comparison (`src/compare_models.py`)
 - **LOO-CV** (Pareto-smoothed importance sampling) — primary
 - **WAIC** — secondary
 - **Bayes Factor** — for hypothesis testing (with caution re: prior sensitivity)
 
-### 6. Posterior Analysis
+### 7. Posterior Analysis (`src/posterior_analysis.py`)
 - Posterior means, medians, 95% credible intervals
-- Posterior density plots, caterpillar plots for player effects
-- Posterior predictive checks (PPC)
+- Forest plots of fixed effects, caterpillar plots of player random intercepts
+- Posterior predictive checks (PPC), trace plots
 
-### 7. Prior Sensitivity Analysis
-- Compare posteriors across the three prior specifications
+### 8. Prior Sensitivity Analysis (`src/sensitivity_analysis.py`)
+- Side-by-side comparison of Prior A vs Prior B posteriors
+- Mean shifts, HDI overlap, sign agreement on H1–H5
+- Overlay density plots for each fixed effect
 
-### 8. Validation
-- Held-out test set: AUC, Brier score, calibration plots
+### 9. Validation (`src/validate_model.py`)
+- Held-out test set: AUC, Brier score, log loss, calibration plots
 - Benchmark against frequentist `lme4` model, plain logistic regression, random forest
 
 ## Tech Stack
