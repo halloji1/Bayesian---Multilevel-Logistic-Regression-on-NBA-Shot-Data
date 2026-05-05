@@ -6,6 +6,50 @@ A hierarchical Bayesian model for predicting NBA shot outcomes, accounting for t
 
 NBA shot data has a natural hierarchical structure: shots are nested within players, players within teams. Standard logistic regression violates the independence assumption and underestimates standard errors. This project uses **Bayesian multilevel logistic regression** to properly model this structure while incorporating prior knowledge from existing basketball analytics research.
 
+## Dataset
+
+**Source:** [NBA Shot Logs](https://www.kaggle.com/datasets/dansbecker/nba-shot-logs) (Kaggle, uploaded by Dan Becker, scraped from the NBA API)
+
+**Coverage:** Every regular-season shot attempt in the **2014–15 NBA season**
+
+**Size:** ~128,000 rows × 21 columns, ~16 MB CSV
+
+**File:** `shot_logs.csv`
+
+### Key Columns Used
+
+| Column | Description | Role in Model |
+|--------|-------------|---------------|
+| `FGM` | Field goal made (1) or missed (0) | **Target** |
+| `SHOT_DIST` | Shot distance from basket (feet) | Level-1 predictor |
+| `CLOSE_DEF_DIST` | Distance to nearest defender (feet) | Level-1 predictor |
+| `SHOT_CLOCK` | Seconds left on shot clock at release | Level-1 predictor |
+| `TOUCH_TIME` | Seconds the shooter held the ball | Level-1 predictor |
+| `PERIOD` | Quarter (1–4, 5+ for OT) | Used to derive `CLUTCH` |
+| `GAME_CLOCK` | Time remaining in the period (`MM:SS`) | Used to derive `CLUTCH` |
+| `FINAL_MARGIN` | Final score margin of the game | Used to derive `CLUTCH` (proxy) |
+| `player_id`, `player_name` | Shooter identity | Level-2 grouping |
+| `LOCATION` | Home (H) or Away (A) | Optional contextual covariate |
+| `PTS_TYPE` | 2-point or 3-point attempt | Optional covariate |
+| `SHOT_RESULT` | "made" / "missed" (redundant with FGM) | EDA only |
+
+Other columns (`GAME_ID`, `MATCHUP`, `SHOT_NUMBER`, `DRIBBLES`, `CLOSEST_DEFENDER`, `CLOSEST_DEFENDER_PLAYER_ID`, `PTS`, `W`) are not used by the model but are retained for EDA and sanity checks.
+
+### Known Data Quality Issues
+
+- `SHOT_CLOCK` has ~5,500 missing values (shots taken with shot clock off, e.g. < 24s remaining in a period). These rows are dropped.
+- `TOUCH_TIME` contains negative values and values above 24 seconds — both physically impossible. Negative values are dropped; values capped at 24s in some prior analyses.
+- `GAME_CLOCK` is stored as a `MM:SS` string and must be parsed to seconds.
+- The dataset only provides `FINAL_MARGIN` (game-level), not the live margin at the time of each shot. The `CLUTCH` flag therefore approximates clutch context using final margin ≤ 5 as a proxy — a documented limitation of the model.
+
+### Why This Dataset
+
+The 2014–15 NBA shot logs are the most widely used public dataset for shot-quality analysis and provide:
+
+- **Defender proximity** — rare in publicly available shot data
+- **Shot clock and touch time** — context for shot difficulty
+- **Player-level grouping** — sufficient sample size per player (median ~150 shots) to support multilevel estimation after the `MIN_SHOTS_PER_PLAYER` filter
+
 ## Motivation
 
 - Quantify how much shot success variation is attributable to player skill, team system, and situational randomness
@@ -106,8 +150,11 @@ A tight prior centered on effect sizes reported in published basketball analytic
 ## Analysis Pipeline
 
 ### 1. Data Acquisition & Cleaning
-- Source: Kaggle NBA Shot Logs (2014-15, ~128k shots) or `nba_api`
-- Handle missing defender distances, drop technical free throws, merge player attribute tables
+- Source: Kaggle NBA Shot Logs (see [Dataset](#dataset) section above)
+- Drop rows with missing `SHOT_CLOCK`, negative `TOUCH_TIME`, or negative distances
+- Parse `GAME_CLOCK` from `MM:SS` to seconds
+- Construct `CLUTCH` flag from `PERIOD`, `GAME_CLOCK`, and `FINAL_MARGIN`
+- Filter to players with ≥ 100 shot attempts to stabilize random effect estimation
 
 ### 2. Exploratory Data Analysis
 - Shot charts, FG% by player/team/position, distribution checks, correlation analysis
@@ -187,7 +234,15 @@ fit_B <- brm(formula, data = shots, family = bernoulli(),
 loo_compare(loo(fit_A), loo(fit_B))
 ```
 
+## Expected Deliverables
 
+- Full posterior distributions for all parameters under **both Prior A and Prior B**
+- Side-by-side comparison of posterior estimates and 95% CrIs across the two priors
+- LOO-CV / WAIC comparison between Prior A and Prior B fits
+- Player ability rankings with credible intervals (highlighting where shrinkage differs between priors)
+- Situational shot probability prediction tool
+- Posterior predictive checks for both specifications
+- Sensitivity analysis report quantifying prior influence on H1–H5
 
 ## Known Challenges
 
