@@ -1,13 +1,3 @@
-"""Posterior summaries and diagnostic plots for a fitted prior model.
-
-Input:   outputs/models/fit_prior_{A|B}.nc
-Outputs: outputs/reports/posterior_summary_prior{A|B}.csv
-         outputs/figures/posterior/forest_prior{A|B}.png
-         outputs/figures/posterior/caterpillar_prior{A|B}.png
-         outputs/figures/posterior/ppc_prior{A|B}.png
-         outputs/figures/posterior/trace_prior{A|B}.png
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -44,10 +34,7 @@ _FIXED_LABELS = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
+# Helpers
 def _nc_path(prior_name: str) -> Path:
     return config.MODELS_DIR / f"fit_prior_{prior_name}.nc"
 
@@ -63,7 +50,6 @@ def _save_fig(fig: plt.Figure, path: Path) -> None:
 
 
 def _load_player_index() -> pd.DataFrame:
-    """Return player_index.csv as a DataFrame."""
     path = config.DATA_PROCESSED_DIR / config.PLAYER_INDEX_CSV
     if not path.exists():
         raise FileNotFoundError(
@@ -78,12 +64,6 @@ def _ensure_ppc(
     prior_name: str,
     nc_path: Path,
 ) -> az.InferenceData:
-    """Sample posterior predictive draws if the group is absent, then resave.
-
-    Rebuilds the PyMC model from train data and the named prior so that
-    pm.sample_posterior_predictive() can generate y_obs predictions for
-    each posterior draw.
-    """
     if hasattr(idata, "posterior_predictive"):
         logger.info("Posterior predictive group already present.")
         return idata
@@ -111,10 +91,7 @@ def _ensure_ppc(
     return idata
 
 
-# ---------------------------------------------------------------------------
 # Plot functions
-# ---------------------------------------------------------------------------
-
 def _plot_forest(idata: az.InferenceData, prior_name: str) -> None:
     """Forest plot of fixed-effect posteriors."""
     az.plot_forest(
@@ -135,7 +112,6 @@ def _plot_caterpillar(
     prior_name: str,
     player_index: pd.DataFrame,
 ) -> None:
-    """Caterpillar plot of player random intercepts: top 20 and bottom 20."""
     beta0_post = idata.posterior["beta0_j"]          # (chain, draw, n_players)
     n_chains, n_draws, n_players = beta0_post.shape
     flat = beta0_post.values.reshape(n_chains * n_draws, n_players)
@@ -181,7 +157,6 @@ def _plot_caterpillar(
 
 
 def _plot_ppc(idata: az.InferenceData, prior_name: str) -> None:
-    """Posterior predictive check: predicted vs. observed FG distribution."""
     ax = az.plot_ppc(
         idata,
         var_names=["y_obs"],
@@ -196,7 +171,6 @@ def _plot_ppc(idata: az.InferenceData, prior_name: str) -> None:
 
 
 def _plot_trace(idata: az.InferenceData, prior_name: str) -> None:
-    """Trace plot for fixed-effect parameters."""
     axes = az.plot_trace(
         idata,
         var_names=_FIXED_VARS,
@@ -209,32 +183,8 @@ def _plot_trace(idata: az.InferenceData, prior_name: str) -> None:
     _save_fig(fig, _fig_path(prior_name, "trace"))
 
 
-# ---------------------------------------------------------------------------
 # Public API
-# ---------------------------------------------------------------------------
-
 def analyze(prior_name: str) -> None:
-    """Generate posterior summaries and diagnostic plots for the named prior fit.
-
-    Steps:
-        1. Load InferenceData from outputs/models/fit_prior_{prior_name}.nc.
-        2. Write az.summary() for fixed effects + random-effect SDs to CSV.
-        3. Save a forest plot of fixed-effect posteriors.
-        4. Save a caterpillar plot of the top/bottom 20 player intercepts.
-        5. Ensure posterior predictive samples exist (sampling if necessary),
-           then save a posterior predictive check plot.
-        6. Save a trace plot of fixed-effect chains.
-
-    Args:
-        prior_name: "A" or "B".
-
-    Raises:
-        FileNotFoundError: If the NetCDF fit file or player_index.csv is missing.
-
-    Side effects:
-        Creates outputs/figures/posterior/ and outputs/reports/ if missing.
-        Writes one CSV and four PNG files named with the prior suffix.
-    """
     nc_path = _nc_path(prior_name)
     if not nc_path.exists():
         raise FileNotFoundError(
@@ -250,9 +200,7 @@ def analyze(prior_name: str) -> None:
 
     player_index = _load_player_index()
 
-    # ------------------------------------------------------------------
     # 1. Summary table
-    # ------------------------------------------------------------------
     logger.info("Computing posterior summary ...")
     summary_df = az.summary(
         idata,
@@ -264,28 +212,20 @@ def analyze(prior_name: str) -> None:
     logger.info("Saved: %s", report_path)
     logger.info("\n%s", summary_df.to_string())
 
-    # ------------------------------------------------------------------
     # 2. Forest plot
-    # ------------------------------------------------------------------
     logger.info("Generating forest plot ...")
     _plot_forest(idata, prior_name)
 
-    # ------------------------------------------------------------------
     # 3. Caterpillar plot
-    # ------------------------------------------------------------------
     logger.info("Generating caterpillar plot ...")
     _plot_caterpillar(idata, prior_name, player_index)
 
-    # ------------------------------------------------------------------
     # 4. Posterior predictive check
-    # ------------------------------------------------------------------
     logger.info("Generating PPC plot ...")
     idata = _ensure_ppc(idata, prior_name, nc_path)
     _plot_ppc(idata, prior_name)
 
-    # ------------------------------------------------------------------
     # 5. Trace plot
-    # ------------------------------------------------------------------
     logger.info("Generating trace plot ...")
     _plot_trace(idata, prior_name)
 
@@ -295,10 +235,6 @@ def analyze(prior_name: str) -> None:
         prior_name, _FIG_DIR, config.REPORTS_DIR,
     )
 
-
-# ---------------------------------------------------------------------------
-# CLI entry point
-# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     config.setup_logging()

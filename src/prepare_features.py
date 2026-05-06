@@ -1,12 +1,3 @@
-"""Standardize predictors, encode player factor, and split into train/test sets.
-
-Input:   data/processed/shots_clean.csv
-Outputs: data/processed/train.csv
-         data/processed/test.csv
-         data/processed/player_index.csv
-         data/processed/scaler_params.json
-"""
-
 from __future__ import annotations
 
 import json
@@ -31,15 +22,8 @@ _SCALE_COLS = [
 _SCALER_PARAMS_PATH = config.DATA_PROCESSED_DIR / "scaler_params.json"
 
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
+# Helpers
 def _build_player_index(df: pd.DataFrame) -> pd.DataFrame:
-    """Return a sorted player-id → 0-indexed integer mapping.
-
-    Sorts by player_id so the index is deterministic across runs.
-    """
     mapping = (
         df[[config.COL_PLAYER_ID, config.COL_PLAYER_NAME]]
         .drop_duplicates(subset=config.COL_PLAYER_ID)
@@ -50,38 +34,8 @@ def _build_player_index(df: pd.DataFrame) -> pd.DataFrame:
     return mapping[[config.COL_PLAYER_ID, config.COL_PLAYER_NAME, config.COL_PLAYER_IDX]]
 
 
-# ---------------------------------------------------------------------------
 # Public API
-# ---------------------------------------------------------------------------
-
 def prepare(input_path: Path | None = None) -> dict[str, Path]:
-    """Standardize predictors, encode player factor, and write train/test splits.
-
-    Steps:
-        1. Z-score standardize SHOT_DIST, CLOSE_DEF_DIST, SHOT_CLOCK, TOUCH_TIME
-           using training-set statistics. Appends *_z columns alongside originals.
-           Saves means and SDs to scaler_params.json for downstream interpretation.
-        2. Build a 0-indexed integer player_idx from player_id (sorted for
-           determinism). Saves the mapping to player_index.csv.
-        3. Stratified 80/20 train/test split on player_idx so every player
-           contributes shots to both sets. Uses config.RANDOM_SEED.
-        4. Saves train.csv and test.csv.
-
-    Args:
-        input_path: Path to cleaned CSV. Defaults to
-                    config.DATA_PROCESSED_DIR / config.CLEAN_CSV.
-
-    Returns:
-        Dict with keys "train", "test", "player_index", "scaler_params"
-        mapping to the absolute Path of each output file.
-
-    Raises:
-        FileNotFoundError: If input_path does not exist.
-
-    Side effects:
-        Creates config.DATA_PROCESSED_DIR if missing.
-        Writes four files under data/processed/.
-    """
     if input_path is None:
         input_path = config.DATA_PROCESSED_DIR / config.CLEAN_CSV
 
@@ -97,12 +51,7 @@ def prepare(input_path: Path | None = None) -> dict[str, Path]:
 
     config.DATA_PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 
-    # ------------------------------------------------------------------
     # 1. Z-score standardize numeric predictors
-    #    Stats are computed on the full cleaned dataset (pre-split) so that
-    #    the scaler_params.json reflect population-level scale and can be
-    #    used consistently at inference time.
-    # ------------------------------------------------------------------
     scaler_params: dict[str, dict[str, float]] = {}
     for col in _SCALE_COLS:
         mean = float(df[col].mean())
@@ -114,9 +63,7 @@ def prepare(input_path: Path | None = None) -> dict[str, Path]:
     _SCALER_PARAMS_PATH.write_text(json.dumps(scaler_params, indent=2))
     logger.info("Saved: %s", _SCALER_PARAMS_PATH)
 
-    # ------------------------------------------------------------------
     # 2. Build 0-indexed player factor and merge onto the dataset
-    # ------------------------------------------------------------------
     player_index = _build_player_index(df)
     df = df.merge(
         player_index[[config.COL_PLAYER_ID, config.COL_PLAYER_IDX]],
@@ -128,11 +75,7 @@ def prepare(input_path: Path | None = None) -> dict[str, Path]:
     player_index.to_csv(player_index_path, index=False)
     logger.info("Saved: %s  (%d players)", player_index_path, len(player_index))
 
-    # ------------------------------------------------------------------
     # 3. Stratified train/test split
-    #    stratify=player_idx guarantees every player appears in both sets,
-    #    since sklearn draws proportional samples from each stratum.
-    # ------------------------------------------------------------------
     train_df, test_df = train_test_split(
         df,
         test_size=1.0 - config.TRAIN_TEST_SPLIT,
@@ -157,9 +100,7 @@ def prepare(input_path: Path | None = None) -> dict[str, Path]:
         "YES" if all_in_both else "NO — investigate players with very few shots",
     )
 
-    # ------------------------------------------------------------------
     # 4. Save train and test CSVs
-    # ------------------------------------------------------------------
     train_path = config.DATA_PROCESSED_DIR / config.TRAIN_CSV
     test_path  = config.DATA_PROCESSED_DIR / config.TEST_CSV
 
@@ -176,9 +117,6 @@ def prepare(input_path: Path | None = None) -> dict[str, Path]:
     }
 
 
-# ---------------------------------------------------------------------------
-# CLI entry point
-# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     config.setup_logging()

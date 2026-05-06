@@ -1,12 +1,3 @@
-"""Evaluate fitted models on the held-out test set.
-
-Inputs:  outputs/models/fit_prior_{A|B}.nc
-         data/processed/test.csv
-Outputs: outputs/reports/validation_metrics.csv
-         outputs/figures/validation/calibration_prior{A|B}.png
-         outputs/figures/validation/roc_prior{A|B}.png
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -33,10 +24,7 @@ _DPI         = 150
 _CHUNK_SIZE  = 250
 
 
-# ---------------------------------------------------------------------------
 # Internal helpers
-# ---------------------------------------------------------------------------
-
 def _nc_path(prior_name: str) -> Path:
     return config.MODELS_DIR / f"fit_prior_{prior_name}.nc"
 
@@ -44,11 +32,6 @@ def _nc_path(prior_name: str) -> Path:
 def _load_test_arrays(
     test_path: Path,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Read test CSV and return typed numpy arrays.
-
-    Returns:
-        (y, dist_z, def_z, sc_z, clutch, player_idx)
-    """
     df = pd.read_csv(test_path)
     return (
         df[config.COL_SHOT_RESULT].to_numpy(dtype=int),
@@ -68,24 +51,6 @@ def _compute_p_hat(
     clutch: np.ndarray,
     player_idx: np.ndarray,
 ) -> np.ndarray:
-    """Compute per-shot posterior-averaged predicted probability.
-
-    Reconstructs the linear predictor for every posterior draw using the
-    sampled fixed effects and player-level parameters, applies the logistic
-    sigmoid, then averages across all draws.  Draw processing is chunked so
-    peak memory stays bounded regardless of chain/draw count.
-
-    Args:
-        idata:      InferenceData containing the posterior group.
-        dist_z:     Standardized shot-distance values, shape (n_test,).
-        def_z:      Standardized defender-distance values.
-        sc_z:       Standardized shot-clock values.
-        clutch:     Binary clutch-situation flag.
-        player_idx: 0-indexed player factor, shape (n_test,).
-
-    Returns:
-        Array of shape (n_test,) with values in (0, 1).
-    """
     n_chains, n_draws, n_players = idata.posterior["beta0_j"].shape
     n_samples = n_chains * n_draws
     n_test    = len(dist_z)
@@ -164,7 +129,6 @@ def _plot_roc(y: np.ndarray, p_hat: np.ndarray, prior_name: str, auc: float) -> 
 
 
 def _upsert_metrics(prior_name: str, metrics: dict[str, float]) -> pd.DataFrame:
-    """Insert or replace the row for prior_name in validation_metrics.csv."""
     config.REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     if _METRICS_CSV.exists():
         df = pd.read_csv(_METRICS_CSV, index_col=0)
@@ -176,31 +140,8 @@ def _upsert_metrics(prior_name: str, metrics: dict[str, float]) -> pd.DataFrame:
     return df
 
 
-# ---------------------------------------------------------------------------
 # Public API
-# ---------------------------------------------------------------------------
-
 def validate(prior_name: str) -> dict[str, float]:
-    """Evaluate one prior fit on the held-out test set.
-
-    Generates posterior-averaged predicted probabilities for each test shot
-    using all posterior draws of fixed effects (beta_def, beta_sc,
-    beta_clutch) and player-level effects (beta0_j, beta_dist_j).  No model
-    rebuild is required — everything is computed from the saved InferenceData.
-
-    Args:
-        prior_name: "A" or "B".
-
-    Returns:
-        Dict with keys: auc, brier_score, log_loss.
-
-    Raises:
-        FileNotFoundError: If the NetCDF fit file or test.csv is missing.
-
-    Side effects:
-        Writes / updates outputs/reports/validation_metrics.csv.
-        Writes two PNG figures to outputs/figures/validation/.
-    """
     nc_path   = _nc_path(prior_name)
     test_path = config.DATA_PROCESSED_DIR / config.TEST_CSV
 
@@ -218,12 +159,12 @@ def validate(prior_name: str) -> dict[str, float]:
     y, dist_z, def_z, sc_z, clutch, player_idx = _load_test_arrays(test_path)
     logger.info("Test set: %d shots, observed FG%% = %.3f", len(y), y.mean())
 
-    # ── Posterior-averaged predictions ───────────────────────────────────
+    # Posterior-averaged predictions
     logger.info("Computing posterior predictive probabilities ...")
     p_hat = _compute_p_hat(idata, dist_z, def_z, sc_z, clutch, player_idx)
     logger.info("Mean predicted FG%% = %.3f", p_hat.mean())
 
-    # ── Metrics ──────────────────────────────────────────────────────────
+    # Metrics
     auc     = float(roc_auc_score(y, p_hat))
     brier   = float(brier_score_loss(y, p_hat))
     logloss = float(log_loss(y, p_hat))
@@ -234,12 +175,12 @@ def validate(prior_name: str) -> dict[str, float]:
         prior_name, auc, brier, logloss,
     )
 
-    # ── Figures ──────────────────────────────────────────────────────────
+    # Figures
     _FIG_DIR.mkdir(parents=True, exist_ok=True)
     _plot_calibration(y, p_hat, prior_name)
     _plot_roc(y, p_hat, prior_name, auc)
 
-    # ── Persist metrics ───────────────────────────────────────────────────
+    # Persist metrics
     full_df = _upsert_metrics(prior_name, metrics)
     logger.info("Metrics table:\n%s", full_df.to_string())
 
@@ -247,15 +188,9 @@ def validate(prior_name: str) -> dict[str, float]:
 
 
 def validate_all() -> pd.DataFrame:
-    """Run validate() for Prior A then Prior B; return combined metrics DataFrame."""
     for prior_name in ("A", "B"):
         validate(prior_name)
     return pd.read_csv(_METRICS_CSV, index_col=0)
-
-
-# ---------------------------------------------------------------------------
-# CLI entry point
-# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     config.setup_logging()

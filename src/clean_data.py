@@ -1,9 +1,3 @@
-"""Clean raw shot_logs.csv and produce shots_clean.csv.
-
-Input:  data/raw/shot_logs.csv
-Output: data/processed/shots_clean.csv
-"""
-
 from __future__ import annotations
 
 import logging
@@ -48,12 +42,9 @@ _RENAME_MAP = {
 }
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
-
 def _parse_game_clock(series: pd.Series) -> pd.Series:
-    """Convert "MM:SS" strings to total seconds as float."""
+    # Convert "MM:SS" strings to total seconds as float.
     split = series.str.split(":", expand=True).astype(float)
     return split[0] * 60 + split[1]
 
@@ -62,33 +53,12 @@ def _log_shape(df: pd.DataFrame, label: str) -> None:
     logger.info("  %-35s  rows=%d", label, len(df))
 
 
-# ---------------------------------------------------------------------------
 # Public API
-# ---------------------------------------------------------------------------
-
 def clean(
     input_path: Path | None = None,
     output_path: Path | None = None,
     min_shots: int | None = None,
 ) -> pd.DataFrame:
-    """Clean raw shot log data and write shots_clean.csv.
-
-    Args:
-        input_path:  Path to raw CSV. Defaults to config.DATA_RAW_DIR / config.RAW_CSV.
-        output_path: Destination path. Defaults to config.DATA_PROCESSED_DIR / config.CLEAN_CSV.
-        min_shots:   Minimum shot attempts to keep a player. Defaults to
-                     config.MIN_SHOTS_PER_PLAYER.
-
-    Returns:
-        Cleaned DataFrame written to output_path.
-
-    Raises:
-        FileNotFoundError: If input_path does not exist.
-
-    Side effects:
-        Creates output_path's parent directory if missing.
-        Writes the cleaned CSV to output_path.
-    """
     if input_path is None:
         input_path = config.DATA_RAW_DIR / config.RAW_CSV
     if output_path is None:
@@ -102,49 +72,34 @@ def clean(
             "Run `python -m src.download_data` first."
         )
 
-    # ------------------------------------------------------------------
     # 1. Load
-    # ------------------------------------------------------------------
     logger.info("Loading %s ...", input_path)
     df = pd.read_csv(input_path)
     logger.info("Loaded  %d rows, %d columns", len(df), len(df.columns))
 
-    # ------------------------------------------------------------------
     # 2. Keep relevant columns
-    # ------------------------------------------------------------------
     missing = [c for c in _KEEP_COLS if c not in df.columns]
     if missing:
         raise ValueError(f"Expected columns not found in raw CSV: {missing}")
     df = df[_KEEP_COLS].copy()
     _log_shape(df, "after column selection")
 
-    # ------------------------------------------------------------------
     # 3. Drop rows with missing SHOT_CLOCK
-    # ------------------------------------------------------------------
     before = len(df)
     df = df.dropna(subset=["SHOT_CLOCK"])
     logger.info("  %-35s  dropped=%d  rows=%d", "drop missing SHOT_CLOCK", before - len(df), len(df))
 
-    # ------------------------------------------------------------------
     # 4. Drop implausible values
-    # ------------------------------------------------------------------
     before = len(df)
     mask_bad = (df["TOUCH_TIME"] < 0) | (df["SHOT_DIST"] < 0) | (df["CLOSE_DEF_DIST"] < 0)
     df = df[~mask_bad]
     logger.info("  %-35s  dropped=%d  rows=%d", "drop implausible negatives", before - len(df), len(df))
 
-    # ------------------------------------------------------------------
     # 5. Parse GAME_CLOCK ("MM:SS") → game_clock_sec (float seconds)
-    # ------------------------------------------------------------------
     df["game_clock_sec"] = _parse_game_clock(df["GAME_CLOCK"])
     df = df.drop(columns=["GAME_CLOCK"])
 
-    # ------------------------------------------------------------------
     # 6. CLUTCH flag: period >= 4, <= 5 min left, game within 5 points.
-    #    Uses FINAL_MARGIN as a proxy for the per-shot score margin;
-    #    this is an acknowledged limitation — the true in-game margin
-    #    at shot time is not available in this dataset.
-    # ------------------------------------------------------------------
     df["clutch"] = (
         (df["PERIOD"] >= 4)
         & (df["game_clock_sec"] <= 300)
@@ -157,9 +112,7 @@ def clean(
         100 * df["clutch"].mean(),
     )
 
-    # ------------------------------------------------------------------
     # 7. Filter to players with >= min_shots attempts
-    # ------------------------------------------------------------------
     shot_counts = df.groupby("player_id")["FGM"].transform("count")
     before = len(df)
     n_players_before = df["player_id"].nunique()
@@ -172,14 +125,10 @@ def clean(
         len(df),
     )
 
-    # ------------------------------------------------------------------
     # 8. Rename to config-aligned names
-    # ------------------------------------------------------------------
     df = df.rename(columns=_RENAME_MAP)
 
-    # ------------------------------------------------------------------
     # 9. Save
-    # ------------------------------------------------------------------
     output_path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(output_path, index=False)
 
@@ -191,10 +140,6 @@ def clean(
     )
     return df
 
-
-# ---------------------------------------------------------------------------
-# CLI entry point
-# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     config.setup_logging()

@@ -1,10 +1,3 @@
-"""Generate exploratory plots and summary statistics from shots_clean.csv.
-
-Input:   data/processed/shots_clean.csv
-Outputs: outputs/figures/eda/*.png
-         outputs/reports/eda_summary.txt
-"""
-
 from __future__ import annotations
 
 import logging
@@ -36,10 +29,7 @@ _CORR_LABELS = ["Shot Dist", "Def Dist", "Shot Clock", "Touch Time"]
 _PCT_FMT = plt.FuncFormatter(lambda x, _: f"{x:.0%}")
 
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
+# Helpers
 def _save(fig: plt.Figure, filename: str) -> None:
     path = _EDA_DIR / filename
     fig.savefig(path, dpi=_DPI, bbox_inches="tight")
@@ -47,10 +37,7 @@ def _save(fig: plt.Figure, filename: str) -> None:
     logger.info("Saved: %s", path)
 
 
-# ---------------------------------------------------------------------------
 # Plot 1: shot distance distribution
-# ---------------------------------------------------------------------------
-
 def _plot_shot_dist_hist(df: pd.DataFrame) -> None:
     fig, ax = plt.subplots(figsize=(8, 4))
     sns.histplot(
@@ -65,10 +52,7 @@ def _plot_shot_dist_hist(df: pd.DataFrame) -> None:
     _save(fig, "01_shot_distance_distribution.png")
 
 
-# ---------------------------------------------------------------------------
 # Plot 2: FG% by distance bucket
-# ---------------------------------------------------------------------------
-
 def _plot_fg_pct_by_distance(df: pd.DataFrame) -> None:
     tmp = df.copy()
     tmp["dist_bucket"] = pd.cut(
@@ -93,10 +77,7 @@ def _plot_fg_pct_by_distance(df: pd.DataFrame) -> None:
     _save(fig, "02_fg_pct_by_distance_bucket.png")
 
 
-# ---------------------------------------------------------------------------
 # Plot 3: FG% by player — top 20 and bottom 20
-# ---------------------------------------------------------------------------
-
 def _plot_fg_pct_by_player(df: pd.DataFrame, min_shots: int) -> None:
     player_fg = (
         df.groupby(config.COL_PLAYER_NAME)[config.COL_SHOT_RESULT]
@@ -123,10 +104,7 @@ def _plot_fg_pct_by_player(df: pd.DataFrame, min_shots: int) -> None:
     _save(fig, "03_fg_pct_by_player_top_bottom.png")
 
 
-# ---------------------------------------------------------------------------
 # Plot 4: defender distance distribution split by shot result
-# ---------------------------------------------------------------------------
-
 def _plot_defender_dist_hist(df: pd.DataFrame) -> None:
     tmp = df[[config.COL_CLOSE_DEF, config.COL_SHOT_RESULT]].copy()
     tmp["Result"] = tmp[config.COL_SHOT_RESULT].map({1: "Made", 0: "Missed"})
@@ -149,10 +127,7 @@ def _plot_defender_dist_hist(df: pd.DataFrame) -> None:
     _save(fig, "04_defender_distance_by_result.png")
 
 
-# ---------------------------------------------------------------------------
 # Plot 5: correlation heatmap
-# ---------------------------------------------------------------------------
-
 def _plot_correlation_heatmap(df: pd.DataFrame) -> None:
     corr = df[_CORR_COLS].corr()
 
@@ -174,10 +149,7 @@ def _plot_correlation_heatmap(df: pd.DataFrame) -> None:
     _save(fig, "05_correlation_heatmap.png")
 
 
-# ---------------------------------------------------------------------------
 # Summary text report
-# ---------------------------------------------------------------------------
-
 def _write_summary(df: pd.DataFrame) -> None:
     stats = df[_CORR_COLS].agg(["mean", "median", "std"]).T
     stats.columns = ["Mean", "Median", "SD"]
@@ -211,24 +183,8 @@ def _write_summary(df: pd.DataFrame) -> None:
     logger.info("\n%s", text)
 
 
-# ---------------------------------------------------------------------------
 # Public API
-# ---------------------------------------------------------------------------
-
 def run_eda(data_path: Path | None = None) -> None:
-    """Generate all EDA figures and the summary report.
-
-    Args:
-        data_path: Path to the cleaned CSV. Defaults to
-                   config.DATA_PROCESSED_DIR / config.CLEAN_CSV.
-
-    Raises:
-        FileNotFoundError: If data_path does not exist.
-
-    Side effects:
-        Creates outputs/figures/eda/ and outputs/reports/ if missing.
-        Writes five 150-DPI PNG files and one plain-text summary.
-    """
     if data_path is None:
         data_path = config.DATA_PROCESSED_DIR / config.CLEAN_CSV
 
@@ -269,10 +225,6 @@ def run_eda(data_path: Path | None = None) -> None:
 
     logger.info("EDA complete.")
 
-
-# ---------------------------------------------------------------------------
-# CLI entry point
-# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     config.setup_logging()

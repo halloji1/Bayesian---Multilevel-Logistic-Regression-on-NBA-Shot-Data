@@ -1,11 +1,3 @@
-"""Side-by-side sensitivity analysis of Prior A vs Prior B posteriors.
-
-Inputs:  outputs/models/fit_prior_A.nc
-         outputs/models/fit_prior_B.nc
-Outputs: outputs/reports/sensitivity_analysis.csv
-         outputs/figures/sensitivity/overlay_{param}.png  (one per fixed effect)
-"""
-
 from __future__ import annotations
 
 import logging
@@ -30,10 +22,7 @@ _FIG_DIR      = config.FIGURES_DIR / "sensitivity"
 _DPI          = 150
 _HDI_PROB     = 0.95
 
-# ---------------------------------------------------------------------------
 # Parameter registry
-# ---------------------------------------------------------------------------
-
 # Scalar fixed-effect variable names as they appear in idata.posterior.
 _FIXED_PARAMS = ["gamma_00", "gamma_10", "beta_def", "beta_sc", "beta_clutch"]
 
@@ -73,12 +62,8 @@ _HYPOTHESES: dict[str, tuple[str, str, str]] = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
+# Helpers
 def _extract_samples(idata: az.InferenceData, var: str, idx: int | None) -> np.ndarray:
-    """Return flat posterior sample array for a scalar or indexed vector param."""
     raw = idata.posterior[var].values          # (chain, draw) or (chain, draw, k)
     if idx is not None:
         raw = raw[:, :, idx]
@@ -86,16 +71,11 @@ def _extract_samples(idata: az.InferenceData, var: str, idx: int | None) -> np.n
 
 
 def _hdi(samples: np.ndarray) -> tuple[float, float]:
-    """Return (low, high) of the HDI_PROB highest density interval."""
     interval = az.hdi(samples, hdi_prob=_HDI_PROB)
     return float(interval[0]), float(interval[1])
 
 
 def _overlap_pct(hdi_a: tuple[float, float], hdi_b: tuple[float, float]) -> float:
-    """Percentage of the combined span that the two HDIs share.
-
-    Uses Jaccard-style: overlap / union × 100.
-    """
     lo = max(hdi_a[0], hdi_b[0])
     hi = min(hdi_a[1], hdi_b[1])
     overlap = max(0.0, hi - lo)
@@ -104,7 +84,6 @@ def _overlap_pct(hdi_a: tuple[float, float], hdi_b: tuple[float, float]) -> floa
 
 
 def _sign_agreement(hdi_a: tuple[float, float], hdi_b: tuple[float, float]) -> bool:
-    """True if both HDIs exclude zero on the same side."""
     a_pos = hdi_a[0] > 0
     a_neg = hdi_a[1] < 0
     b_pos = hdi_b[0] > 0
@@ -113,7 +92,6 @@ def _sign_agreement(hdi_a: tuple[float, float], hdi_b: tuple[float, float]) -> b
 
 
 def _supports_hypothesis(hdi: tuple[float, float], direction: str) -> bool:
-    """True if the HDI excludes zero in the predicted direction."""
     if direction == "positive":
         return hdi[0] > 0
     if direction == "negative":
@@ -121,15 +99,11 @@ def _supports_hypothesis(hdi: tuple[float, float], direction: str) -> bool:
     return False
 
 
-# ---------------------------------------------------------------------------
 # Main analysis
-# ---------------------------------------------------------------------------
-
 def _build_param_rows(
     idata_A: az.InferenceData,
     idata_B: az.InferenceData,
 ) -> pd.DataFrame:
-    """Compute posterior statistics for every parameter; return summary DataFrame."""
     rows: list[dict] = []
 
     # Scalar fixed effects
@@ -176,7 +150,6 @@ def _build_param_rows(
 
 
 def _build_hypothesis_rows(param_df: pd.DataFrame) -> pd.DataFrame:
-    """Evaluate each hypothesis against the computed HDIs; return summary DataFrame."""
     rows: list[dict] = []
     for hyp_id, (param, direction, description) in _HYPOTHESES.items():
         hdi_A = (param_df.loc[param, "hdi_low_A"], param_df.loc[param, "hdi_high_A"])
@@ -203,10 +176,7 @@ def _build_hypothesis_rows(param_df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows).set_index("hypothesis")
 
 
-# ---------------------------------------------------------------------------
 # Overlay density plots
-# ---------------------------------------------------------------------------
-
 def _overlay_plot(
     idata_A: az.InferenceData,
     idata_B: az.InferenceData,
@@ -214,7 +184,6 @@ def _overlay_plot(
     prior_A: dict,
     prior_B: dict,
 ) -> None:
-    """Posterior + prior overlay for a single fixed-effect parameter."""
     samples_A = _extract_samples(idata_A, var, None)
     samples_B = _extract_samples(idata_B, var, None)
 
@@ -256,31 +225,8 @@ def _overlay_plot(
     logger.info("Saved: %s", out_path)
 
 
-# ---------------------------------------------------------------------------
 # Public API
-# ---------------------------------------------------------------------------
-
 def run_sensitivity() -> pd.DataFrame:
-    """Compare Prior A and Prior B posteriors across all fixed-effect parameters.
-
-    Steps:
-        1. Load both InferenceData objects.
-        2. Compute posterior means, 95% HDIs, mean shift, HDI overlap %, and
-           sign agreement for fixed effects and random-effect SDs.
-        3. Evaluate five directional hypotheses (H1–H5) against both posteriors.
-        4. Save the parameter table and hypothesis table to
-           outputs/reports/sensitivity_analysis.csv (two sections, blank row
-           between them).
-        5. Save one overlay density PNG per scalar fixed effect to
-           outputs/figures/sensitivity/.
-
-    Returns:
-        Parameter-level summary DataFrame (rows = parameters, includes all
-        computed statistics).
-
-    Raises:
-        FileNotFoundError: If either fit NetCDF is missing.
-    """
     for path in (_MODEL_A_PATH, _MODEL_B_PATH):
         if not path.exists():
             raise FileNotFoundError(
@@ -297,9 +243,7 @@ def run_sensitivity() -> pd.DataFrame:
     prior_A = get_prior("A")
     prior_B = get_prior("B")
 
-    # ------------------------------------------------------------------
     # 1. Parameter-level statistics
-    # ------------------------------------------------------------------
     logger.info("Computing parameter statistics ...")
     param_df = _build_param_rows(idata_A, idata_B)
 
@@ -311,15 +255,11 @@ def run_sensitivity() -> pd.DataFrame:
             row.hdi_overlap_pct, row.sign_agreement,
         )
 
-    # ------------------------------------------------------------------
     # 2. Hypothesis-level summary
-    # ------------------------------------------------------------------
     logger.info("Evaluating hypotheses H1–H5 ...")
     hyp_df = _build_hypothesis_rows(param_df)
 
-    # ------------------------------------------------------------------
-    # 3. Save CSV (two sections)
-    # ------------------------------------------------------------------
+    # 3. Save CSV
     config.REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     with open(_REPORT_PATH, "w") as fh:
         fh.write("# Parameter sensitivity summary\n")
@@ -328,9 +268,7 @@ def run_sensitivity() -> pd.DataFrame:
         hyp_df.to_csv(fh)
     logger.info("Saved: %s", _REPORT_PATH)
 
-    # ------------------------------------------------------------------
     # 4. Overlay density plots
-    # ------------------------------------------------------------------
     _FIG_DIR.mkdir(parents=True, exist_ok=True)
     sns.set_theme()
     for var in _FIXED_PARAMS:
@@ -339,11 +277,6 @@ def run_sensitivity() -> pd.DataFrame:
 
     logger.info("Sensitivity analysis complete.")
     return param_df
-
-
-# ---------------------------------------------------------------------------
-# CLI entry point
-# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     config.setup_logging()

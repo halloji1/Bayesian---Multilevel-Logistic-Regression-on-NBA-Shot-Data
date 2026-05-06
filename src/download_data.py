@@ -1,5 +1,3 @@
-"""Download the NBA Shot Logs dataset from Kaggle to data/raw/."""
-
 from __future__ import annotations
 
 import argparse
@@ -17,23 +15,6 @@ DATASET_SLUG = "dansbecker/nba-shot-logs"
 
 
 def download(force: bool = False) -> Path:
-    """Download shot_logs.csv from Kaggle and place it in DATA_RAW_DIR.
-
-    Uses kagglehub.dataset_download(), which caches the dataset locally and
-    returns the path to the cached directory. The CSV is then copied into
-    config.DATA_RAW_DIR / config.RAW_CSV.
-
-    Args:
-        force: Re-download and overwrite even if the destination file already
-               exists. Default is False.
-
-    Returns:
-        Absolute Path to the CSV file at config.DATA_RAW_DIR / config.RAW_CSV.
-
-    Side effects:
-        Creates config.DATA_RAW_DIR if it does not exist.
-        Writes (or overwrites) config.DATA_RAW_DIR / config.RAW_CSV.
-    """
     dest = config.DATA_RAW_DIR / config.RAW_CSV
 
     if dest.exists() and not force:

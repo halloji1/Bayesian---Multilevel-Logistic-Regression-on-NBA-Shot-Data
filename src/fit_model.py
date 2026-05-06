@@ -1,49 +1,3 @@
-"""Fit the Bayesian multilevel logistic regression model using PyMC.
-
-# ---------------------------------------------------------------------------
-# Model Graph
-# ---------------------------------------------------------------------------
-#
-#  Hyperpriors (population means)
-#  ───────────────────────────────
-#  gamma_00  ~ Normal(mu_0, sigma_0)         population intercept
-#  gamma_10  ~ Normal(mu_1, sigma_1)         population distance slope
-#
-#  Fixed effects
-#  ─────────────
-#  beta_def    ~ Normal(mu, sigma)           defender distance (global)
-#  beta_sc     ~ Normal(mu, sigma)           shot clock (global)
-#  beta_clutch ~ Normal(mu, sigma)           clutch situation (global)
-#
-#  Random-effect covariance  (LKJ Cholesky, dim=2)
-#  ──────────────────────────────────────────────
-#  chol_cov ~ LKJCholeskyCov(n=2, eta, sd_dist=HalfNormal(sigma_re))
-#  Sigma = chol_cov @ chol_cov.T
-#
-#  Non-centered player offsets
-#  ───────────────────────────
-#  z_player[j]    ~ Normal(0, I_2)           j = 0 … N_players-1
-#  player_offsets  = z_player @ chol_cov.T   shape (N_players, 2)
-#
-#  Player-specific parameters  (deterministic)
-#  ────────────────────────────────────────────
-#  beta0_j[j]     = gamma_00 + player_offsets[j, 0]
-#  beta_dist_j[j] = gamma_10 + player_offsets[j, 1]
-#
-#  Linear predictor  (shot i by player player_idx[i])
-#  ───────────────────────────────────────────────────
-#  eta_i = beta0_j[player_idx_i]
-#        + beta_dist_j[player_idx_i] * dist_z_i
-#        + beta_def    * def_z_i
-#        + beta_sc     * sc_z_i
-#        + beta_clutch * clutch_i
-#
-#  Likelihood
-#  ──────────
-#  y_obs_i ~ Bernoulli(invlogit(eta_i))
-# ---------------------------------------------------------------------------
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -62,10 +16,7 @@ from src.priors import get_prior
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
+# Helpers
 def _output_path(prior_name: str) -> Path:
     return config.MODELS_DIR / f"fit_prior_{prior_name}.nc"
 
@@ -73,11 +24,6 @@ def _output_path(prior_name: str) -> Path:
 def _load_train_arrays(
     train_path: Path,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, int]:
-    """Read train CSV and return typed numpy arrays for PyMC.
-
-    Returns:
-        (y, dist_z, def_z, sc_z, clutch, player_idx, n_players)
-    """
     df = pd.read_csv(train_path)
 
     y          = df[config.COL_SHOT_RESULT].to_numpy(dtype=int)
@@ -105,10 +51,9 @@ def _build_model(
     n_players: int,
     prior: dict,
 ) -> pm.Model:
-    """Construct the PyMC model with non-centered player random effects."""
     with pm.Model() as model:
 
-        # ── Population-level means (hyperpriors) ──────────────────────────
+        # Population-level means (hyperpriors)
         gamma_00 = pm.Normal(
             "gamma_00",
             mu=prior["intercept"]["mu"],
@@ -120,7 +65,7 @@ def _build_model(
             sigma=prior["slopes"]["distance"]["sigma"],
         )
 
-        # ── Fixed effects ─────────────────────────────────────────────────
+        # Fixed effects
         beta_def = pm.Normal(
             "beta_def",
             mu=prior["slopes"]["def_dist"]["mu"],
@@ -137,7 +82,7 @@ def _build_model(
             sigma=prior["slopes"]["clutch"]["sigma"],
         )
 
-        # ── LKJ Cholesky covariance for (intercept, distance slope) ───────
+        # LKJ Cholesky covariance for (intercept, distance slope)
         sd_dist = pm.HalfNormal.dist(
             sigma=prior["random_effect_sd"]["sigma"], shape=2
         )
@@ -149,16 +94,13 @@ def _build_model(
             compute_corr=True,
         )
 
-        # ── Non-centered player offsets ────────────────────────────────────
-        # z_player[j] ~ Normal(0, I_2)
-        # player_offsets[j] = chol_cov @ z_player[j]
-        # In matrix form: z_player @ chol_cov.T  (shape: n_players × 2)
+        # Non-centered player offsets
         z_player = pm.Normal(
             "z_player", mu=0.0, sigma=1.0, shape=(n_players, 2)
         )
         player_offsets = pt.dot(z_player, chol_cov.T)
 
-        # ── Player-specific parameters (deterministic for posterior access) ─
+        # Player-specific parameters
         beta0_j = pm.Deterministic(
             "beta0_j", gamma_00 + player_offsets[:, 0]
         )
@@ -166,7 +108,7 @@ def _build_model(
             "beta_dist_j", gamma_10 + player_offsets[:, 1]
         )
 
-        # ── Linear predictor ──────────────────────────────────────────────
+        # Linear predictor
         eta = (
             beta0_j[player_idx]
             + beta_dist_j[player_idx] * dist_z
@@ -175,7 +117,7 @@ def _build_model(
             + beta_clutch * clutch
         )
 
-        # ── Likelihood ────────────────────────────────────────────────────
+        # Likelihood
         p = pm.math.invlogit(eta)
         pm.Bernoulli("y_obs", p=p, observed=y)
 
@@ -183,7 +125,6 @@ def _build_model(
 
 
 def _log_diagnostics(idata: az.InferenceData) -> None:
-    """Compute and log R-hat, ESS, and divergence counts."""
     scalar_vars = ["gamma_00", "gamma_10", "beta_def", "beta_sc", "beta_clutch"]
     summary = az.summary(idata, var_names=scalar_vars, round_to=4)
 
@@ -208,34 +149,8 @@ def _log_diagnostics(idata: az.InferenceData) -> None:
         )
 
 
-# ---------------------------------------------------------------------------
 # Public API
-# ---------------------------------------------------------------------------
-
 def fit(prior_name: str, force: bool = False) -> az.InferenceData:
-    """Fit the multilevel logistic regression under the named prior.
-
-    Uses non-centered parameterization for player-level random effects
-    (intercept + distance slope drawn jointly via LKJ Cholesky covariance).
-    Defender distance, shot clock, and clutch are fixed (global) effects.
-
-    Args:
-        prior_name: "A" (weakly informative) or "B" (strongly informative).
-                    See src/priors.py for full specifications.
-        force:      Re-fit and overwrite even if the output NetCDF exists.
-
-    Returns:
-        ArviZ InferenceData containing posterior and sample_stats groups.
-
-    Raises:
-        ValueError:        If prior_name is not "A" or "B".
-        FileNotFoundError: If train.csv is missing.
-        RuntimeError:      If divergences exceed 5% of total samples.
-
-    Side effects:
-        Creates outputs/models/ if missing.
-        Writes outputs/models/fit_prior_{prior_name}.nc.
-    """
     output_path = _output_path(prior_name)
 
     if output_path.exists() and not force:
@@ -298,10 +213,6 @@ def fit(prior_name: str, force: bool = False) -> az.InferenceData:
 
     return idata
 
-
-# ---------------------------------------------------------------------------
-# CLI entry point
-# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     config.setup_logging()
