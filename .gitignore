@@ -7,8 +7,7 @@ data/
 
 # outputs
 results/
-outputs/
-*.nc
+outputs/models
 figures/
 
 # Python cache
