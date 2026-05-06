@@ -8,6 +8,7 @@ data/
 # outputs
 results/
 outputs/
+*.nc
 figures/
 
 # Python cache
