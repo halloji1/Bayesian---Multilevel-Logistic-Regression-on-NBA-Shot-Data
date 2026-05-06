@@ -1,22 +1,3 @@
-"""Entry point for the NBA Shot Bayesian analysis pipeline.
-
-Usage examples:
-    python main.py --all                   # full pipeline, both priors
-    python main.py --download              # step 0: fetch raw data
-    python main.py --clean                 # step 1: clean raw CSV
-    python main.py --eda                   # step 2: exploratory analysis
-    python main.py --prepare               # step 3: feature prep & splits
-    python main.py --fit                   # step 4: fit both priors
-    python main.py --fit --prior A         # step 4: fit Prior A only
-    python main.py --compare               # step 5: LOO model comparison
-    python main.py --posterior             # step 6: posterior analysis, both
-    python main.py --posterior --prior B   # step 6: Prior B only
-    python main.py --sensitivity           # step 7: sensitivity analysis
-    python main.py --validate              # step 8: held-out validation, both
-    python main.py --validate --prior A    # step 8: Prior A only
-    python main.py --fit --prior A --force # force re-fit even if file exists
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -30,18 +11,14 @@ import config
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 def _priors(args: argparse.Namespace) -> list[str]:
-    """Return the list of priors to process for steps that accept --prior."""
     return [args.prior] if args.prior else ["A", "B"]
 
 
 @contextlib.contextmanager
 def _timed(name: str):
-    """Context manager that logs step start and elapsed time on exit."""
     logger.info("─── START %-20s ───", name)
     t0 = time.perf_counter()
     yield
@@ -62,10 +39,7 @@ def _run(name: str, fn: Callable[[argparse.Namespace], None], args: argparse.Nam
         sys.exit(1)
 
 
-# ---------------------------------------------------------------------------
-# Step functions  (deferred imports keep startup fast)
-# ---------------------------------------------------------------------------
-
+# Step functions
 def step_download(args: argparse.Namespace) -> None:
     from src.download_data import download
     download(force=args.force)
@@ -118,9 +92,7 @@ def step_validate(args: argparse.Namespace) -> None:
         validate_all()
 
 
-# ---------------------------------------------------------------------------
 # Full pipeline
-# ---------------------------------------------------------------------------
 
 _ORDERED_STEPS: list[tuple[str, Callable]] = [
     ("download",    step_download),
@@ -138,7 +110,6 @@ _STEP_FLAGS = [name for name, _ in _ORDERED_STEPS]
 
 
 def run_full_pipeline(args: argparse.Namespace) -> None:
-    """Execute every pipeline step in order."""
     t_start = time.perf_counter()
     logger.info("════ Full pipeline start ════")
     for name, fn in _ORDERED_STEPS:
@@ -146,10 +117,7 @@ def run_full_pipeline(args: argparse.Namespace) -> None:
     logger.info("════ Full pipeline done (%.1f s) ════", time.perf_counter() - t_start)
 
 
-# ---------------------------------------------------------------------------
 # CLI
-# ---------------------------------------------------------------------------
-
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description="Bayesian Multilevel Logistic Regression — NBA Shot Data",
@@ -189,7 +157,6 @@ def main() -> None:
 
     config.setup_logging()
 
-    # Print help if no actionable flag was given
     if not args.all and not any(getattr(args, flag) for flag in _STEP_FLAGS):
         parser.print_help()
         sys.exit(0)
