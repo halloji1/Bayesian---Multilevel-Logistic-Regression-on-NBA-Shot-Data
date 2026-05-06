@@ -1,14 +1,11 @@
 # data files
 data/
-*.csv
 *.parquet
 *.nc
 *.h5
 
 # outputs
-results/
 outputs/models
-figures/
 
 # Python cache
 __pycache__/
