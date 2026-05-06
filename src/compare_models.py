@@ -1,12 +1,9 @@
 from __future__ import annotations
-
 import logging
 from pathlib import Path
-
 import arviz as az
 import matplotlib.pyplot as plt
 import pandas as pd
-
 import config
 
 logger = logging.getLogger(__name__)

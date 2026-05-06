@@ -1,12 +1,10 @@
 from __future__ import annotations
-
 import argparse
 import contextlib
 import logging
 import sys
 import time
 from typing import Callable
-
 import config
 
 logger = logging.getLogger(__name__)

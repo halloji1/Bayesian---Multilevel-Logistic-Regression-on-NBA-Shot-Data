@@ -1,9 +1,7 @@
 from __future__ import annotations
-
 import argparse
 import logging
 from pathlib import Path
-
 import arviz as az
 import matplotlib.pyplot as plt
 import numpy as np
@@ -11,7 +9,6 @@ import pandas as pd
 from sklearn.calibration import calibration_curve
 from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score, roc_curve
 from tqdm import tqdm
-
 import config
 
 logger = logging.getLogger(__name__)

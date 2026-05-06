@@ -1,15 +1,12 @@
 from __future__ import annotations
-
 import argparse
 import logging
 from pathlib import Path
-
 import arviz as az
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pymc as pm
-
 import config
 from src.fit_model import _build_model, _load_train_arrays
 from src.priors import get_prior

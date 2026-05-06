@@ -1,15 +1,12 @@
 from __future__ import annotations
-
 import argparse
 import logging
 from pathlib import Path
-
 import arviz as az
 import numpy as np
 import pandas as pd
 import pymc as pm
 import pytensor.tensor as pt
-
 import config
 from src.priors import get_prior
 

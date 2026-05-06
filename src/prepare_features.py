@@ -1,12 +1,9 @@
 from __future__ import annotations
-
 import json
 import logging
 from pathlib import Path
-
 import pandas as pd
 from sklearn.model_selection import train_test_split
-
 import config
 
 logger = logging.getLogger(__name__)

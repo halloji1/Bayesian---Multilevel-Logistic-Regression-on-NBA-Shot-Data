@@ -1,15 +1,12 @@
 from __future__ import annotations
-
 import logging
 from pathlib import Path
-
 import arviz as az
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
 from scipy import stats
-
 import config
 from src.priors import get_prior
 
