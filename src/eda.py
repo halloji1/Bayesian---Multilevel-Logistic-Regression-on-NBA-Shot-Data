@@ -1,12 +1,9 @@
 from __future__ import annotations
-
 import logging
 from pathlib import Path
-
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
-
 import config
 
 logger = logging.getLogger(__name__)

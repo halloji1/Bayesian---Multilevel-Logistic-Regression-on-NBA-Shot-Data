@@ -88,7 +88,7 @@ logit(p_ij) = β_0j + β_1j · Distance_ij + β_2 · DefDist_ij
 ### Random Effects (Player Level)
 
 ```
-(β_0j, β_1j) ~ MVN((γ_00, γ_10), Σ)
+(β_0j, β_1j) ~ N((γ_00, γ_10), Σ)
 ```
 
 ### Model Building Strategy
